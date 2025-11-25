@@ -8,8 +8,12 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithPopup,
+  fetchSignInMethodsForEmail,
+  linkWithCredential,
   type User as FirebaseUser,
+  type AuthError,
 } from "firebase/auth"
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import { auth, db } from "./firebase"
@@ -22,6 +26,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string, fullName: string) => Promise<void>
   signInWithGoogle: () => Promise<{ success: boolean; error?: string }>
+  signInWithApple: () => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
   isAdmin: boolean
 }
@@ -114,8 +119,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await handleGoogleUserDoc(result.user)
       return { success: true }
     } catch (error: unknown) {
-      const firebaseError = error as { code?: string; message?: string }
+      const firebaseError = error as AuthError
       console.error("[v0] Google sign-in error:", firebaseError.code, firebaseError.message)
+
+      // Handle account merging
+      if (firebaseError.code === "auth/account-exists-with-different-credential") {
+        try {
+          // Get the email from the error
+          const email = firebaseError.customData?.email as string
+
+          if (email) {
+            // Fetch sign-in methods for this email
+            const signInMethods = await fetchSignInMethodsForEmail(auth, email)
+
+            // If the user has an email/password account, we can merge
+            if (signInMethods.includes("password")) {
+              return {
+                success: false,
+                error: `An account already exists with ${email}. Please sign in with email/password first, then link your Google account from your profile settings.`,
+              }
+            }
+          }
+        } catch (mergeError) {
+          console.error("[v0] Account merging error:", mergeError)
+        }
+
+        return {
+          success: false,
+          error: "An account already exists with this email. Please sign in using your original method.",
+        }
+      }
 
       // Return user-friendly error messages
       let errorMessage = "Failed to sign in with Google"
@@ -131,6 +164,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           "This domain is not authorized for Google sign-in. Please use email/password or deploy to an authorized domain."
       } else if (firebaseError.code === "auth/operation-not-allowed") {
         errorMessage = "Google sign-in is not enabled in Firebase."
+      } else if (firebaseError.message) {
+        errorMessage = firebaseError.message
+      }
+
+      return { success: false, error: errorMessage }
+    }
+  }
+
+  const signInWithApple = async (): Promise<{ success: boolean; error?: string }> => {
+    const provider = new OAuthProvider("apple.com")
+    provider.addScope("email")
+    provider.addScope("name")
+    provider.setCustomParameters({
+      locale: "en",
+    })
+
+    try {
+      console.log("[v0] Starting Apple sign-in...")
+      const result = await signInWithPopup(auth, provider)
+      console.log("[v0] Apple sign-in successful:", result.user.email)
+      await handleGoogleUserDoc(result.user) // Reuse the same user doc handler
+      return { success: true }
+    } catch (error: unknown) {
+      const firebaseError = error as AuthError
+      console.error("[v0] Apple sign-in error:", firebaseError.code, firebaseError.message)
+
+      // Handle account merging for Apple
+      if (firebaseError.code === "auth/account-exists-with-different-credential") {
+        return {
+          success: false,
+          error: "An account already exists with this email. Please sign in using your original method.",
+        }
+      }
+
+      // Return user-friendly error messages
+      let errorMessage = "Failed to sign in with Apple"
+
+      if (firebaseError.code === "auth/popup-blocked") {
+        errorMessage = "Popup was blocked. Please allow popups for this site."
+      } else if (firebaseError.code === "auth/popup-closed-by-user") {
+        errorMessage = "Sign-in was cancelled."
+      } else if (firebaseError.code === "auth/cancelled-popup-request") {
+        errorMessage = "Sign-in was cancelled."
+      } else if (firebaseError.code === "auth/operation-not-allowed") {
+        errorMessage = "Apple sign-in is not enabled in Firebase."
       } else if (firebaseError.message) {
         errorMessage = firebaseError.message
       }
@@ -155,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn,
         signUp,
         signInWithGoogle,
+        signInWithApple,
         logout,
         isAdmin,
       }}

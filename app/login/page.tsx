@@ -14,7 +14,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.push("/events")
+      // If user is already logged in, redirect to dashboard
+      router.push("/dashboard")
     }
   }, [user, loading, router])
 
@@ -42,7 +43,7 @@ export default function LoginPage() {
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
         {"Don't have an account? "}
-        <Link href="/signup" className="text-primary hover:underline">
+        <Link href="/signup" className="text-primary hover:underline font-medium">
           Sign up
         </Link>
       </p>
