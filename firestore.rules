@@ -1,0 +1,115 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Anyone can read user profiles (needed for player lists, partner searches, etc.)
+      allow read: if isSignedIn();
+      
+      // Users can create their own profile during signup
+      allow create: if isSignedIn() && isOwner(userId);
+      
+      // Users can update their own profile OR admins can update any profile
+      allow update: if isSignedIn() && (isOwner(userId) || isAdmin());
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+    
+    // Clubs collection
+    match /clubs/{clubId} {
+      // Anyone authenticated can read clubs
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete clubs
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Events collection
+    match /events/{eventId} {
+      // Anyone authenticated can read events
+      allow read: if isSignedIn();
+      
+      // Only admins can create, update, or delete events
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Registrations collection
+    match /registrations/{registrationId} {
+      // Users can read their own registrations or all registrations for events they're admin of
+      allow read: if isSignedIn() && 
+                     (resource.data.playerId == request.auth.uid || 
+                      resource.data.player2Id == request.auth.uid ||
+                      isAdmin());
+      
+      // Users can create registrations for themselves
+      allow create: if isSignedIn() && 
+                       (request.resource.data.playerId == request.auth.uid);
+      
+      // Users can update their own registrations OR admins can update any registration
+      allow update: if isSignedIn() && 
+                       (resource.data.playerId == request.auth.uid || 
+                        resource.data.player2Id == request.auth.uid ||
+                        isAdmin());
+      
+      // Users can delete their own registrations OR admins can delete any registration
+      allow delete: if isSignedIn() && 
+                       (resource.data.playerId == request.auth.uid || 
+                        isAdmin());
+    }
+    
+    // Teams collection
+    match /teams/{teamId} {
+      // Anyone authenticated can read teams
+      allow read: if isSignedIn();
+      
+      // Users can create teams where they are one of the players
+      allow create: if isSignedIn() && 
+                       (request.resource.data.player1Id == request.auth.uid || 
+                        request.resource.data.player2Id == request.auth.uid);
+      
+      // Users can update teams where they are one of the players OR admins
+      allow update: if isSignedIn() && 
+                       (resource.data.player1Id == request.auth.uid || 
+                        resource.data.player2Id == request.auth.uid ||
+                        isAdmin());
+      
+      // Users can delete teams where they are one of the players OR admins
+      allow delete: if isSignedIn() && 
+                       (resource.data.player1Id == request.auth.uid || 
+                        resource.data.player2Id == request.auth.uid ||
+                        isAdmin());
+    }
+    
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can only read their own notifications
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // System (or admins) can create notifications for users
+      allow create: if isSignedIn();
+      
+      // Users can update their own notifications (e.g., mark as read)
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own notifications
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

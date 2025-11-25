@@ -15,7 +15,7 @@ import {
   type User as FirebaseUser,
   type AuthError,
 } from "firebase/auth"
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from "firebase/firestore"
 import { auth, db } from "./firebase"
 import type { User } from "./types"
 
@@ -57,24 +57,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let unsubscribeUserData: (() => void) | null = null
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log("[v0] Auth state changed:", firebaseUser?.email || "null")
+
+      // Clean up previous user data listener if it exists
+      if (unsubscribeUserData) {
+        unsubscribeUserData()
+        unsubscribeUserData = null
+      }
+
       setUser(firebaseUser)
 
       if (firebaseUser) {
+        const userDocRef = doc(db, "users", firebaseUser.uid)
+
         try {
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid))
-          if (userDoc.exists()) {
-            setUserData(userDoc.data() as User)
-          } else {
+          // First check if document exists
+          const userDoc = await getDoc(userDocRef)
+
+          if (!userDoc.exists()) {
+            // Create user document if it doesn't exist (e.g., from Google sign-in)
+            console.log("[v0] Creating user document for:", firebaseUser.email)
             await handleGoogleUserDoc(firebaseUser)
-            const newUserDoc = await getDoc(doc(db, "users", firebaseUser.uid))
-            if (newUserDoc.exists()) {
-              setUserData(newUserDoc.data() as User)
-            }
           }
+
+          // Set up real-time listener for user data updates
+          unsubscribeUserData = onSnapshot(
+            userDocRef,
+            (doc) => {
+              if (doc.exists()) {
+                console.log("[v0] User data updated from Firestore")
+                setUserData(doc.data() as User)
+              } else {
+                console.warn("[v0] User document no longer exists")
+                setUserData(null)
+              }
+            },
+            (error) => {
+              console.error("[v0] Error listening to user data:", error)
+              setUserData(null)
+            }
+          )
         } catch (error) {
-          console.error("[v0] Error fetching user data:", error)
+          console.error("[v0] Error setting up user data listener:", error)
+          setUserData(null)
         }
       } else {
         setUserData(null)
@@ -83,7 +111,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
     })
 
-    return () => unsubscribe()
+    // Cleanup function
+    return () => {
+      console.log("[v0] Cleaning up auth listeners")
+      unsubscribe()
+      if (unsubscribeUserData) {
+        unsubscribeUserData()
+      }
+    }
   }, [])
 
   const signIn = async (email: string, password: string) => {

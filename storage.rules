@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isValidImageUpload() {
+      return request.resource.size < 5 * 1024 * 1024 // Max 5MB
+             && request.resource.contentType.matches('image/.*');
+    }
+    
+    // Profile pictures
+    match /profile-pictures/{userId}/{fileName} {
+      // Users can read their own profile pictures and any other user's pictures
+      allow read: if isSignedIn();
+      
+      // Users can only upload their own profile pictures
+      allow write: if isSignedIn() && isOwner(userId) && isValidImageUpload();
+      
+      // Users can delete their own profile pictures
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+    
+    // Event/Club logos (only admins)
+    match /logos/{fileName} {
+      // Anyone can read logos
+      allow read: if true;
+      
+      // Only admins can upload logos (Note: This requires checking Firestore, 
+      // which is expensive. Consider using Firebase Functions for admin uploads)
+      allow write: if isSignedIn() && 
+                      firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+                      
+      allow delete: if isSignedIn() && 
+                       firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Default deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
