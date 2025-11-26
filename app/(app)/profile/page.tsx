@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore"
+import { doc, updateDoc, serverTimestamp, getDoc } from "firebase/firestore"
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { db, storage } from "@/lib/firebase"
 import { useAuth } from "@/lib/auth-context"
@@ -24,13 +24,13 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false)
 
   const [formData, setFormData] = useState({
-    fullName: "",
-    nickname: "",
-    phone: "",
-    gender: "",
-    hand: "",
-    position: "",
-    skillLevel: "",
+    fullName: userData?.fullName || "",
+    nickname: userData?.nickname || "",
+    phone: userData?.phone || "",
+    gender: userData?.gender || "",
+    hand: userData?.hand || "",
+    position: userData?.position || "",
+    skillLevel: userData?.skillLevel || "",
   })
 
   useEffect(() => {
@@ -46,6 +46,33 @@ export default function ProfilePage() {
       })
     }
   }, [userData])
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (user?.uid) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", user.uid))
+          if (userDoc.exists()) {
+            const data = userDoc.data()
+            setFormData((prev) => ({
+              ...prev,
+              fullName: data.fullName || "",
+              nickname: data.nickname || "",
+              phone: data.phone || "",
+              gender: data.gender || "",
+              hand: data.hand || "",
+              position: data.position || "",
+              skillLevel: data.skillLevel || "",
+            }))
+          }
+        } catch (error) {
+          console.error("Error fetching user profile:", error)
+        }
+      }
+    }
+
+    fetchUserData()
+  }, [user?.uid])
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

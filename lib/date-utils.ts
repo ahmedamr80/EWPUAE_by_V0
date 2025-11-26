@@ -174,3 +174,54 @@ export function isRegistrationOpen(
     const deadlineMillis = timestampToMillis(eventDateTime) - (hoursBeforeEvent * 60 * 60 * 1000)
     return Date.now() < deadlineMillis
 }
+
+/**
+ * Parse duration string to milliseconds
+ * Supports: "90 min", "1.5 hours", "2 hr", etc.
+ * Default: 60 minutes
+ */
+export function parseDurationToMillis(durationStr: string | undefined | null): number {
+    if (!durationStr) return 60 * 60 * 1000 // Default 1 hour
+
+    const lower = durationStr.toLowerCase().trim()
+
+    try {
+        // Handle "min" or "minutes"
+        if (lower.includes('min')) {
+            const minutes = parseInt(lower.replace(/[^0-9]/g, ''), 10)
+            return (isNaN(minutes) ? 60 : minutes) * 60 * 1000
+        }
+
+        // Handle "hour", "hr"
+        if (lower.includes('hour') || lower.includes('hr')) {
+            // Extract float number (e.g. "1.5")
+            const matches = lower.match(/[0-9.]+/)
+            const hours = matches ? parseFloat(matches[0]) : 1
+            return (isNaN(hours) ? 1 : hours) * 60 * 60 * 1000
+        }
+    } catch (e) {
+        console.warn("Error parsing duration:", durationStr, e)
+    }
+
+    return 60 * 60 * 1000 // Default fallback
+}
+
+/**
+ * Calculate dynamic event status based on date and duration
+ * Returns: 'Upcoming' | 'Active' | 'Past'
+ */
+export function calculateEventStatus(
+    eventDateTime: Timestamp | null | undefined,
+    durationStr: string | undefined | null
+): 'Upcoming' | 'Active' | 'Past' {
+    if (!eventDateTime) return 'Upcoming'
+
+    const now = Date.now()
+    const start = timestampToMillis(eventDateTime)
+    const duration = parseDurationToMillis(durationStr)
+    const end = start + duration
+
+    if (now < start) return 'Upcoming'
+    if (now >= start && now <= end) return 'Active'
+    return 'Past'
+}

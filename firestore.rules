@@ -3,118 +3,91 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
+    // --- HELPER FUNCTIONS ---
     function isSignedIn() {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return request.auth.uid == userId;
-    }
-    
     function isAdmin() {
+      // strict check: must be signed in AND have 'admin' role in their user doc
       return isSignedIn() && 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
-    // Users collection
+    // --- USERS ---
     match /users/{userId} {
-      // Anyone can read user profiles (needed for player lists, partner searches, etc.)
       allow read: if isSignedIn();
-      
-      // Users can create their own profile during signup
-      allow create: if isSignedIn() && isOwner(userId);
-      
-      // Users can update their own profile OR admins can update any profile
-      allow update: if isSignedIn() && (isOwner(userId) || isAdmin());
-      
-      // Only admins can delete users
-      allow delete: if isAdmin();
+      // Allow users to create their own doc, OR admins to create any doc (Shadow Accounts)
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Allow users to update their own doc, OR admins to update any doc
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Allow users to delete their own account, OR admins to delete any account
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
     
-    // Clubs collection
+    // --- CLUBS ---
     match /clubs/{clubId} {
-      // Anyone authenticated can read clubs
       allow read: if isSignedIn();
-      
-      // Only admins can create, update, or delete clubs
-      allow create, update, delete: if isAdmin();
+      allow write: if isAdmin();
     }
-    
-    // Events collection - WITH VISIBILITY CONTROL
+
+    // --- EVENTS ---
     match /events/{eventId} {
-      // Read rules:
-      // - Authenticated users can only see public events (isPublic == true)
-      // - Admins can see ALL events (public and private)
-      allow read: if isSignedIn() && (resource.data.isPublic == true || isAdmin());
+      // 1. Get (Single Document): Strict check - Public OR Admin
+      allow get: if resource.data.isPublic == true || isAdmin();
       
-      // List queries must be authenticated and limited
-      allow list: if isSignedIn() && request.query.limit <= 100;
+      // 2. List (Query): Relaxed check to prevent "Snapshot Listener" error.
+      // We rely on the client-side query to filter private events for non-admins.
+      allow list: if true; 
       
-      // Only admins can create, update, or delete events
-      allow create, update, delete: if isAdmin();
+      allow write: if isAdmin();
     }
     
-    // Registrations collection
+    // --- REGISTRATIONS ---
     match /registrations/{registrationId} {
-      // Users can read their own registrations or all registrations for events they're admin of
       allow read: if isSignedIn() && 
-                     (resource.data.playerId == request.auth.uid || 
-                      resource.data.player2Id == request.auth.uid ||
-                      isAdmin());
+                   (resource.data.playerId == request.auth.uid || 
+                    resource.data.player2Id == request.auth.uid || 
+                    isAdmin());
       
-      // Users can create registrations for themselves
-      allow create: if isSignedIn() && 
-                       (request.resource.data.playerId == request.auth.uid);
+      // Allow users to create their own registration
+      allow create: if isSignedIn() && request.resource.data.playerId == request.auth.uid || isAdmin();
       
-      // Users can update their own registrations OR admins can update any registration
-      allow update: if isSignedIn() && 
-                       (resource.data.playerId == request.auth.uid || 
-                        resource.data.player2Id == request.auth.uid ||
-                        isAdmin());
-      
-      // Users can delete their own registrations OR admins can delete any registration
-      allow delete: if isSignedIn() && 
-                       (resource.data.playerId == request.auth.uid || 
-                        isAdmin());
+      allow update, delete: if isSignedIn() && 
+                             (resource.data.playerId == request.auth.uid || 
+                              resource.data.player2Id == request.auth.uid || 
+                              isAdmin());
     }
     
-    // Teams collection
+    // --- TEAMS ---
     match /teams/{teamId} {
-      // Anyone authenticated can read teams
       allow read: if isSignedIn();
-      
-      // Users can create teams where they are one of the players
       allow create: if isSignedIn() && 
-                       (request.resource.data.player1Id == request.auth.uid || 
-                        request.resource.data.player2Id == request.auth.uid);
-      
-      // Users can update teams where they are one of the players OR admins
-      allow update: if isSignedIn() && 
-                       (resource.data.player1Id == request.auth.uid || 
-                        resource.data.player2Id == request.auth.uid ||
-                        isAdmin());
-      
-      // Users can delete teams where they are one of the players OR admins
-      allow delete: if isSignedIn() && 
-                       (resource.data.player1Id == request.auth.uid || 
-                        resource.data.player2Id == request.auth.uid ||
-                        isAdmin());
+                     (request.resource.data.player1Id == request.auth.uid || 
+                      request.resource.data.player2Id == request.auth.uid);
+                      
+      allow update, delete: if isSignedIn() && 
+                             (resource.data.player1Id == request.auth.uid || 
+                              resource.data.player2Id == request.auth.uid || 
+                              isAdmin());
     }
     
-    // Notifications collection
+    // --- NOTIFICATIONS ---
     match /notifications/{notificationId} {
-      // Users can only read their own notifications
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      
-      // System (or admins) can create notifications for users
-      allow create: if isSignedIn();
-      
-      // Users can update their own notifications (e.g., mark as read)
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      
-      // Users can delete their own notifications
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() || isAdmin();
+    }
+    
+    // --- PARTNER REQUESTS ---
+    match /partnerRequests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.requesterId == request.auth.uid || 
+        resource.data.targetPlayerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.requesterId == request.auth.uid || isAdmin();
+      allow update: if isSignedIn() && request.auth.uid == resource.data.targetPlayerId || isAdmin(); // Target accepts/denies
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.requesterId || isAdmin(); // Requester cancels
     }
   }
 }

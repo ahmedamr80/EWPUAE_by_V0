@@ -1,0 +1,18 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "isPublic",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dateTime",
+                    "order": "ASCENDING"
+                }
+            ]
+        }
+    ]
+}

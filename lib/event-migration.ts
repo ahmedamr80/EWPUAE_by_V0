@@ -1,144 +1,135 @@
 /**
  * Event Visibility Migration Utility
- * 
+ *
  * Migrates legacy events (without isPublic field) to have isPublic: true
- * This ensures existing events remain visible after adding the visibility filter
+ * and ensures the dateTime field is stored as a Firestore Timestamp.
+ * This guarantees existing events remain visible after adding the visibility filter.
  */
 
-import { collection, query, where, getDocs, writeBatch, doc } from "firebase/firestore"
-import { db } from "./firebase"
-import { handleAsync, type ApiResponse } from "./error-utils"
+import { collection, getDocs, writeBatch, doc, Timestamp } from "firebase/firestore";
+import { db } from "./firebase";
+import { handleAsync, type ApiResponse } from "./error-utils";
 
 export interface MigrationResult {
-    totalProcessed: number
-    successCount: number
-    failedCount: number
-    errors: string[]
+    totalProcessed: number;
+    successCount: number;
+    failedCount: number;
+    errors: string[];
 }
 
 /**
- * Migrate all events without isPublic field to isPublic: true
- * 
- * This function:
- * 1. Finds all events where isPublic is undefined or null
- * 2. Updates them in batches to set isPublic: true
- * 3. Returns detailed migration results
+ * Migrate all events that are missing the `isPublic` flag or have a `dateTime`
+ * stored as a string. The function sets `isPublic: true` and converts the
+ * string to a Firestore Timestamp.
  */
 export async function migrateEventsToPublic(): Promise<ApiResponse<MigrationResult>> {
     return handleAsync(async () => {
-        console.log("[Migration] Starting event visibility migration...")
+        console.log("[Migration] Starting event visibility and dateTime migration...");
 
         const result: MigrationResult = {
             totalProcessed: 0,
             successCount: 0,
             failedCount: 0,
             errors: [],
+        };
+
+        const eventsRef = collection(db, "events");
+        const snapshot = await getDocs(eventsRef);
+
+        // Identify events needing migration
+        const eventsToMigrate = snapshot.docs.filter((docSnap) => {
+            const data = docSnap.data();
+            const needsPublic = data.isPublic === undefined || data.isPublic === null;
+            const needsDateTime = typeof data.dateTime === "string";
+            return needsPublic || needsDateTime;
+        });
+
+        result.totalProcessed = eventsToMigrate.length;
+        if (eventsToMigrate.length === 0) {
+            console.log("[Migration] No events require migration");
+            return result;
         }
 
-        try {
-            // Fetch all events
-            const eventsRef = collection(db, "events")
-            const allEventsSnapshot = await getDocs(eventsRef)
+        console.log(`[Migration] Found ${eventsToMigrate.length} events to migrate`);
 
-            // Filter events that don't have isPublic field
-            const eventsToMigrate = allEventsSnapshot.docs.filter(
-                (doc) => {
-                    const data = doc.data()
-                    return data.isPublic === undefined || data.isPublic === null
-                }
-            )
+        const batchSize = 500;
+        let batch = writeBatch(db);
+        let ops = 0;
 
-            result.totalProcessed = eventsToMigrate.length
+        for (let i = 0; i < eventsToMigrate.length; i++) {
+            const docSnap = eventsToMigrate[i];
+            const data = docSnap.data();
+            const updates: any = {};
 
-            if (eventsToMigrate.length === 0) {
-                console.log("[Migration] No events need migration")
-                return result
+            // Ensure isPublic flag
+            if (data.isPublic === undefined || data.isPublic === null) {
+                updates.isPublic = true;
             }
 
-            console.log(`[Migration] Found ${eventsToMigrate.length} events to migrate`)
-
-            // Firestore batches can handle up to 500 operations
-            const batchSize = 500
-            let batch = writeBatch(db)
-            let operationCount = 0
-
-            for (let i = 0; i < eventsToMigrate.length; i++) {
-                const eventDoc = eventsToMigrate[i]
-
-                try {
-                    // Update event to set isPublic: true
-                    batch.update(doc(db, "events", eventDoc.id), {
-                        isPublic: true,
-                    })
-
-                    operationCount++
-                    result.successCount++
-
-                    // Commit batch when it reaches the limit or at the end
-                    if (operationCount === batchSize || i === eventsToMigrate.length - 1) {
-                        await batch.commit()
-                        console.log(`[Migration] Committed batch of ${operationCount} updates`)
-
-                        // Start new batch if there are more events
-                        if (i < eventsToMigrate.length - 1) {
-                            batch = writeBatch(db)
-                            operationCount = 0
-                        }
-                    }
-                } catch (error) {
-                    result.failedCount++
-                    const errorMsg = `Failed to update event ${eventDoc.id}: ${error}`
-                    result.errors.push(errorMsg)
-                    console.error(`[Migration] ${errorMsg}`)
+            // Convert dateTime if stored as string
+            if (typeof data.dateTime === "string") {
+                const parsed = new Date(data.dateTime);
+                if (!isNaN(parsed.getTime())) {
+                    updates.dateTime = Timestamp.fromDate(parsed);
+                } else {
+                    result.failedCount++;
+                    result.errors.push(`Invalid dateTime string for event ${docSnap.id}`);
+                    continue; // skip this document
                 }
             }
 
-            console.log(`[Migration] Complete. Success: ${result.successCount}, Failed: ${result.failedCount}`)
-            return result
-        } catch (error) {
-            console.error("[Migration] Migration failed:", error)
-            throw error
+            if (Object.keys(updates).length > 0) {
+                batch.update(doc(db, "events", docSnap.id), updates);
+                ops++;
+                result.successCount++;
+            }
+
+            // Commit batch when limit reached or at the end
+            if (ops === batchSize || i === eventsToMigrate.length - 1) {
+                await batch.commit();
+                console.log(`[Migration] Committed batch of ${ops} updates`);
+                if (i < eventsToMigrate.length - 1) {
+                    batch = writeBatch(db);
+                    ops = 0;
+                }
+            }
         }
-    }, "Failed to migrate events")
+
+        console.log(`[Migration] Completed. Success: ${result.successCount}, Failed: ${result.failedCount}`);
+        return result;
+    }, "Failed to migrate events");
 }
 
 /**
- * Get count of events that need migration
+ * Get count of events that need migration (missing isPublic or dateTime string).
  */
 export async function getEventsMigrationCount(): Promise<ApiResponse<number>> {
     return handleAsync(async () => {
-        const eventsRef = collection(db, "events")
-        const allEventsSnapshot = await getDocs(eventsRef)
-
-        const count = allEventsSnapshot.docs.filter(
-            (doc) => {
-                const data = doc.data()
-                return data.isPublic === undefined || data.isPublic === null
-            }
-        ).length
-
-        return count
-    }, "Failed to get migration count")
+        const eventsRef = collection(db, "events");
+        const snapshot = await getDocs(eventsRef);
+        const count = snapshot.docs.filter((docSnap) => {
+            const data = docSnap.data();
+            const needsPublic = data.isPublic === undefined || data.isPublic === null;
+            const needsDateTime = typeof data.dateTime === "string";
+            return needsPublic || needsDateTime;
+        }).length;
+        return count;
+    }, "Failed to get migration count");
 }
 
 /**
- * Verify all events have isPublic field
+ * Verify that all events have the `isPublic` flag and a proper Timestamp for `dateTime`.
  */
 export async function verifyEventsMigration(): Promise<ApiResponse<{ allMigrated: boolean; remaining: number }>> {
     return handleAsync(async () => {
-        const eventsRef = collection(db, "events")
-        const allEventsSnapshot = await getDocs(eventsRef)
-
-        const remaining = allEventsSnapshot.docs.filter(
-            (doc) => {
-                const data = doc.data()
-                return data.isPublic === undefined || data.isPublic === null
-            }
-        ).length
-
-        return {
-            allMigrated: remaining === 0,
-            remaining,
-        }
-    }, "Failed to verify migration")
+        const eventsRef = collection(db, "events");
+        const snapshot = await getDocs(eventsRef);
+        const remaining = snapshot.docs.filter((docSnap) => {
+            const data = docSnap.data();
+            const needsPublic = data.isPublic === undefined || data.isPublic === null;
+            const needsDateTime = typeof data.dateTime === "string";
+            return needsPublic || needsDateTime;
+        }).length;
+        return { allMigrated: remaining === 0, remaining };
+    }, "Failed to verify migration");
 }

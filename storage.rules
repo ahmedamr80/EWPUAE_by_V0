@@ -1,6 +1,5 @@
 rules_version = '2';
 
-// Firebase Storage Security Rules
 service firebase.storage {
   match /b/{bucket}/o {
     
@@ -9,42 +8,30 @@ service firebase.storage {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return request.auth.uid == userId;
+    function isAdmin() {
+      return isSignedIn() && 
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
-    function isValidImageUpload() {
-      return request.resource.size < 5 * 1024 * 1024 // Max 5MB
-             && request.resource.contentType.matches('image/.*');
-    }
-    
-    // Profile pictures
+    // Profile Pictures: Users can upload/delete their own. Admins can manage all.
     match /profile-pictures/{userId}/{fileName} {
-      // Users can read their own profile pictures and any other user's pictures
-      allow read: if isSignedIn();
-      
-      // Users can only upload their own profile pictures
-      allow write: if isSignedIn() && isOwner(userId) && isValidImageUpload();
-      
-      // Users can delete their own profile pictures
-      allow delete: if isSignedIn() && isOwner(userId);
+      allow read: if true; // Profile pictures are public
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
     
-    // Event/Club logos (only admins)
-    match /logos/{fileName} {
-      // Anyone can read logos
+    // Event Logos: Only admins can manage.
+    match /event-logos/{allPaths=**} {
       allow read: if true;
-      
-      // Only admins can upload logos (Note: This requires checking Firestore, 
-      // which is expensive. Consider using Firebase Functions for admin uploads)
-      allow write: if isSignedIn() && 
-                      firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
-                      
-      allow delete: if isSignedIn() && 
-                       firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow write: if isAdmin();
     }
     
-    // Default deny all other paths
+    // Club Pictures: Only admins can manage.
+    match /club-pictures/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Default deny
     match /{allPaths=**} {
       allow read, write: if false;
     }

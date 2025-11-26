@@ -27,6 +27,7 @@ import {
   getDocs,
   deleteDoc,
   runTransaction,
+  updateDoc,
 } from "firebase/firestore"
 import { auth, db } from "./firebase"
 import type { User } from "./types"
@@ -47,9 +48,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 async function handleGoogleUserDoc(user: FirebaseUser) {
   const { uid, email, displayName, photoURL } = user
-  const userDoc = await getDoc(doc(db, "users", uid))
+  const userDocRef = doc(db, "users", uid)
+  const userDoc = await getDoc(userDocRef)
+
   if (!userDoc.exists()) {
-    await setDoc(doc(db, "users", uid), {
+    // New User: Create document
+    await setDoc(userDocRef, {
       uid,
       email,
       fullName: displayName || "New Player",
@@ -60,6 +64,15 @@ async function handleGoogleUserDoc(user: FirebaseUser) {
       updatedAt: serverTimestamp(),
       createdBy: "google",
     })
+  } else {
+    // Returning User: Sync photo if missing in Firestore
+    const userData = userDoc.data()
+    if (!userData.photoUrl && photoURL) {
+      await updateDoc(userDocRef, {
+        photoUrl: photoURL,
+        updatedAt: serverTimestamp(),
+      })
+    }
   }
 }
 

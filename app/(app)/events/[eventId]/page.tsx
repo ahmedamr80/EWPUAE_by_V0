@@ -60,11 +60,22 @@ export default function EventDetailPage() {
     if (!eventId) return
 
     // Listen to event
-    const unsubEvent = onSnapshot(doc(db, "events", eventId), (docSnap) => {
-      if (docSnap.exists()) {
-        setEvent({ eventId: docSnap.id, ...docSnap.data() } as Event)
+    const unsubEvent = onSnapshot(
+      doc(db, "events", eventId),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setEvent({ eventId: docSnap.id, ...docSnap.data() } as Event)
+        }
+      },
+      (error) => {
+        console.error("Error fetching event:", error)
+        if (error.code === "permission-denied") {
+          // Handle permission denied (e.g., redirect or show error state)
+          // For now, we just log it, but in a real app we might want to set an error state
+          setLoading(false)
+        }
       }
-    })
+    )
 
     // Listen to registrations
     const regQuery = query(collection(db, "registrations"), where("eventId", "==", eventId))
@@ -232,14 +243,14 @@ export default function EventDetailPage() {
   return (
     <div className="pb-24">
       {/* Header Image */}
-      <div className="relative aspect-[16/9] w-full">
+      <div className="relative aspect-video w-full">
         <Image
           src={event.logoUrl || `/placeholder.svg?height=300&width=600&query=padel tournament ${event.eventName}`}
           alt={event.eventName}
           fill
           className="object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent" />
+        <div className="absolute inset-0 bg-linear-to-t from-background via-background/50 to-transparent" />
         <Button
           variant="ghost"
           size="icon"
