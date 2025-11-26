@@ -41,10 +41,15 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
     
-    // Events collection
+    // Events collection - WITH VISIBILITY CONTROL
     match /events/{eventId} {
-      // Anyone authenticated can read events
-      allow read: if isSignedIn();
+      // Read rules:
+      // - Authenticated users can only see public events (isPublic == true)
+      // - Admins can see ALL events (public and private)
+      allow read: if isSignedIn() && (resource.data.isPublic == true || isAdmin());
+      
+      // List queries must be authenticated and limited
+      allow list: if isSignedIn() && request.query.limit <= 100;
       
       // Only admins can create, update, or delete events
       allow create, update, delete: if isAdmin();
