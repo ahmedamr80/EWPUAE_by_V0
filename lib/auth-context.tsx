@@ -15,7 +15,19 @@ import {
   type User as FirebaseUser,
   type AuthError,
 } from "firebase/auth"
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from "firebase/firestore"
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  onSnapshot,
+  collection,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
+  runTransaction,
+} from "firebase/firestore"
 import { auth, db } from "./firebase"
 import type { User } from "./types"
 

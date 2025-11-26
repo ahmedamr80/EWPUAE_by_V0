@@ -17,6 +17,7 @@ export interface User {
   notes?: string | null
   role: "player" | "admin"
   registrationStatus: "active" | "inactive" | "suspended"
+  isShadow?: boolean // Shadow account created by admin, pending real user signup
   createdAt: Timestamp
   updatedAt: Timestamp
   createdBy?: string
@@ -95,12 +96,12 @@ export interface Notification {
   id: string
   userId: string
   type:
-    | "partner_invite"
-    | "partner_accepted"
-    | "partner_denied"
-    | "waitlist_promotion"
-    | "event_cancelled"
-    | "team_cancelled"
+  | "partner_invite"
+  | "partner_accepted"
+  | "partner_denied"
+  | "waitlist_promotion"
+  | "event_cancelled"
+  | "team_cancelled"
   title: string
   message: string
   eventId?: string
